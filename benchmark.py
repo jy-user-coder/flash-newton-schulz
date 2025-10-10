@@ -15,9 +15,10 @@ Usage examples:
 On first run, `torch.compile` and Triton autotuning may add overhead during warmup.
 
 
-This code was insipired by the benchmark code from flash-muon: https://github.com/nil0x9/flash-muon/tree/main
+This code was inspired by the benchmark code from flash-muon: https://github.com/nil0x9/flash-muon/tree/main
 """
 
+import os
 import argparse
 import time
 from collections import defaultdict
@@ -87,6 +88,10 @@ def make_batch(batch, m, n, dtype, device, seed=0, dist_type="levy"):
         X = torch.rand((batch, m, n), generator=gen, device=device, dtype=dtype) - 0.5
     elif dist_type == "normal":
         X = torch.randn((batch, m, n), generator=gen, device=device, dtype=dtype)
+
+    # In order to test whether the learned NS coefficients generalize to new distributions
+    elif dist_type == "bernoulli":
+        X = torch.randint(0, 2, (batch, m, n), generator=gen, device=device, dtype=dtype)
     else:
         raise ValueError(f"Unknown dist_type: {dist_type}")
     return X
@@ -165,7 +170,8 @@ def main():
         "--warmup", type=int, default=4, help="Warmup runs before timing"
     )
     parser.add_argument(
-        "--dist-type", type=str, default="levy", choices=["levy", "uniform", "normal"]
+        "--dist_type", type=str, default="levy", choices=["levy", "uniform", "normal", "bernoulli"],
+        help="Type of random distribution for input matrices",
     )
     parser.add_argument(
         "--no-plot", dest="plot", action="store_false", help="Disable SV plots"
@@ -208,7 +214,7 @@ def main():
             dtype=dtype,
             device=device,
             seed=args.seed,
-            uniform=args.uniform,
+            dist_type=args.dist_type,
         )
         bench["device"].append(device_string())
         bench["dim"].append((m, n))
@@ -288,7 +294,8 @@ def main():
             plt.grid(True, which="both", linestyle="--", alpha=0.3)
             plt.legend()
             plt.tight_layout()
-            fig.savefig(f"svs_{m}x{n}.png", dpi=150)
+            os.makedirs("figs", exist_ok=True)
+            fig.savefig(f"figs/svs_{m}x{n}.png", dpi=150)
             plt.close(fig)
 
 
