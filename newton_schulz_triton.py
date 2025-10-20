@@ -474,27 +474,21 @@ def ns_line_3(B: Tensor, X: Tensor, a: float, *, out: Tensor = None) -> Tensor:
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def newton_schulz_torch(G: Tensor, epsilon: float = 1e-7):
+def NS_muon(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Reference implementation of Newton-Schulz without Triton.
     """
-    # Newton-Schulz constants
-    ns_consts = [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ]
 
-    X = G.to(dtype=torch.bfloat16)
+    X = G.to(dtype=dtype)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
     # Ensure spectral norm is at most 1
     X = X / (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
 
-    for a, b, c in ns_consts:
+    # for a, b, c in ns_consts:
+    a, b, c = (3.4445, -4.7750, 2.0315)
+    for _ in range(iter):
         A = X @ X.mT
         B = b * A + c * (A @ A)
         X = a * X + B @ X
@@ -505,7 +499,7 @@ def newton_schulz_torch(G: Tensor, epsilon: float = 1e-7):
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def newton_schulz_triton_dion(G: Tensor, epsilon: float = 1e-7):
+def NS_dion(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -516,9 +510,9 @@ def newton_schulz_triton_dion(G: Tensor, epsilon: float = 1e-7):
         (3.7418, -5.5913, 2.3037),
         (2.8769, -3.1427, 1.2046),
         (2.8366, -3.0525, 1.2012),
-    ]
+    ][-iter:]
 
-    X = G.to(dtype=torch.bfloat16)
+    X = G.to(dtype=dtype)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -546,18 +540,19 @@ def newton_schulz_triton_dion(G: Tensor, epsilon: float = 1e-7):
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def newton_schulz_triton_aol(G: Tensor, epsilon: float = 1e-7):
+def NS_ours(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
     # Newton-Schulz constants
     ns_consts = [
-        [4.6051, -9.6552, 5.6769],
-        [4.7505, -6.0861, 2.1790],
-        [2.7763, -2.3190, 0.5523],
-        [2.4231, -2.2861, 0.8193],
-    ]
-    X = G.to(dtype=torch.bfloat16)
+        (4.0848, -6.8946, 2.9270),
+        (3.9505, -6.3029, 2.6377),
+        (3.7418, -5.5913, 2.3037),
+        (2.8769, -3.1427, 1.2046),
+        (2.8366, -3.0525, 1.2012),
+    ][-iter:]
+    X = G.to(dtype=dtype)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -576,9 +571,9 @@ def newton_schulz_triton_aol(G: Tensor, epsilon: float = 1e-7):
     # starting point for the newton schulz iterations as the matrix is closer to orthogonal
     # thanks to this, we can save one iteration of newton schulz.
     ns_line_1(X, out=A)  # gram matrix A = X @ X.mT
-    s = torch.rsqrt(torch.clamp_min(
-        A.abs().sum(dim=-1, keepdim=False), min=epsilon
-    ))  # AOL rescaling vector
+    s = torch.rsqrt(
+        torch.clamp_min(A.abs().sum(dim=-1, keepdim=False), min=epsilon)
+    )  # AOL rescaling vector
     X = X * s.unsqueeze(-1)  # rescale X using s making it closer to orthogonal
     # first NS iteration with reuse of A
     a, b, c = ns_consts[0]
