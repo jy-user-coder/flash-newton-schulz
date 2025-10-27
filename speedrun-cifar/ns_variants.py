@@ -594,6 +594,8 @@ def NS_aol_standard(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloa
     # Add this guardrail
     if G.ndim == 4:
         X = G.reshape(G.size(0), -1)
+    else:
+        X = G
     X = X.to(dtype=dtype)
 
     # Newton-Schulz constants
@@ -707,3 +709,14 @@ def NS_aol_conv(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloat16)
     if G.size(-2) > G.size(-1):
         X = X.mT
     return X
+
+if __name__ == "__main__":
+    errs = []
+    X = torch.randn((10, 32, 32), device="cuda", dtype=torch.bfloat16)
+    Y = NS_aol_standard(X, iters=4)
+    for x, y in zip(X, Y):
+        U, S, Vh = torch.linalg.svd(x.float())
+        Q = U @ Vh
+        errs.append(torch.linalg.norm(Q - y, ord='fro') / torch.linalg.norm(Q, ord='fro'))
+    print("Avg relative frobenius error over 10 matrices:", torch.stack(errs).mean().item())
+
