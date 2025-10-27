@@ -64,7 +64,7 @@ On the cifar speedrun setup, we obtain similar final accuracies:
 | AOL + NS | 0.9401 | 0.0016 | 2.64 | 20 |
 
 This minor speedup is expected as the model is small, however, it does validate the equal capability of our approach to optimize
-the model.
+the model. Also, we did not modify any hyperparameter from the baseline NS run to replicate this result.
 
 ## Citation
 
