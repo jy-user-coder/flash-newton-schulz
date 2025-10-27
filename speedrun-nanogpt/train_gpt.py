@@ -638,6 +638,7 @@ def ns_AOLxDion(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
         X = X.mT
     return X
 
+
 @torch.compile(dynamic=False, fullgraph=True)
 def NS_muon(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
@@ -931,7 +932,9 @@ class Muon(torch.optim.Optimizer):
                 v_chunk = newton_schulz_impl(batched, iter=cmd_args.ns_iter)
                 v_chunk = v_chunk.view(original_shape)
             else:
-                v_chunk = newton_schulz_impl(batched_update_grads, iter=cmd_args.ns_iter)
+                v_chunk = newton_schulz_impl(
+                    batched_update_grads, iter=cmd_args.ns_iter
+                )
 
             # Add the computed zeropower update to the parameters in the buffer.
             # This loop applies the zeropower output (v_chunk) to the `updated_param_chunk` buffer.
@@ -1658,8 +1661,9 @@ def distributed_data_generator(
         if align_to_bos:
             try:
                 seq_starts, seq_ends = finder.next_batch(num_tokens_local, max_seq_len)
-                start_idxs, end_idxs = torch.tensor(seq_starts[rank]), torch.tensor(
-                    seq_ends[rank]
+                start_idxs, end_idxs = (
+                    torch.tensor(seq_starts[rank]),
+                    torch.tensor(seq_ends[rank]),
                 )
             except StopIteration:
                 # This shard is exhausted, load the next one in the next loop iteration.
@@ -1670,9 +1674,9 @@ def distributed_data_generator(
             buf = torch.cat([tokens[i:j] for i, j in zip(start_idxs, end_idxs)])
             _inputs = buf[:-1]
             _targets = buf[1:]
-            end_idxs[
-                -1
-            ] -= 1  # last document was too long to account for _targets offset
+            end_idxs[-1] -= (
+                1  # last document was too long to account for _targets offset
+            )
             cum_lengths = (end_idxs - start_idxs).cumsum(0)
 
         else:
@@ -1729,7 +1733,10 @@ parser.add_argument(
     help="Type of Newton-Schulz implementation to use",
 )
 parser.add_argument(
-    "--num_scheduled_iterations", type=int, default=2290, help="Number of scheduled iterations"
+    "--num_scheduled_iterations",
+    type=int,
+    default=2290,
+    help="Number of scheduled iterations",
 )
 cmd_args = parser.parse_args()
 
@@ -1745,13 +1752,13 @@ newton_schulz_impl = ns_impls[cmd_args.ns_impl]
 @dataclass
 class Hyperparameters:
     # data
-    train_files: str = "/dev/shm/fineweb10B/fineweb_train_*.bin"  # input .bin to train on
+    train_files: str = (
+        "/dev/shm/fineweb10B/fineweb_train_*.bin"  # input .bin to train on
+    )
     val_files: str = (
         "/dev/shm/fineweb10B/fineweb_val_*.bin"  # input .bin to eval validation loss on
     )
-    val_tokens: int = (
-        10485760  # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    )
+    val_tokens: int = 10485760  # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
     train_batch_size: int = 2048 * 16 * 8
     train_max_seq_len: int = 128 * 16
     val_batch_size: int = 4 * 64 * 1024 * 8
@@ -1763,9 +1770,7 @@ class Hyperparameters:
         40  # number of steps to continue training at final lr and ws
     )
     num_iterations: int = num_scheduled_iterations + num_extension_iterations
-    cooldown_frac: int = (
-        0.45  # fraction of num_scheduled_iterations spent cooling down the learning rate
-    )
+    cooldown_frac: int = 0.45  # fraction of num_scheduled_iterations spent cooling down the learning rate
     # evaluation and logging
     run_id: str = f"{uuid.uuid4()}"
     val_loss_every: int = (
@@ -1775,12 +1780,11 @@ class Hyperparameters:
     # attention masking
     block_size: int = 128
     ws_schedule: tuple = (3, 7, 11)
-    ws_validate: int = (
-        13  # increase final validation ws, used for YaRN extension and short window size @classiclarryd
-    )
+    ws_validate: int = 13  # increase final validation ws, used for YaRN extension and short window size @classiclarryd
     ws_validate_post_yarn_ext: int = (
         20  # extend long windows out even further after applying YaRN
     )
+
 
 args = Hyperparameters()
 
@@ -1816,12 +1820,15 @@ def print0(s, console=False):
             if console:
                 print(s)
             print(s, file=f)
+
+
 def print_global(s, console=False):
     if master_process:
         with open(global_logfile, "a") as f:
             if console:
                 print(s)
             print(s, file=f)
+
 
 # begin by printing this file (the Python code)
 print0(code)
@@ -2081,7 +2088,10 @@ for step in range(train_steps + 1):
         console=True,
     )
 
-print_global(f"val_loss:{val_loss:.4f}, runtime: {training_time_ms:.0f}, ns impl: {cmd_args.ns_impl}, ns iter: {cmd_args.ns_iter}, num_scheduled_iterations: {args.num_scheduled_iterations}, run_id:{args.run_id}", console=True)
+print_global(
+    f"val_loss:{val_loss:.4f}, runtime: {training_time_ms:.0f}, ns impl: {cmd_args.ns_impl}, ns iter: {cmd_args.ns_iter}, num_scheduled_iterations: {args.num_scheduled_iterations}, run_id:{args.run_id}",
+    console=True,
+)
 
 print0(
     f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "

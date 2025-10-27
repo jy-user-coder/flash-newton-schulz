@@ -633,7 +633,9 @@ def update(
     momentum_buffer.copy_(momentum * momentum_buffer + (1 - momentum) * grad)
     v = ns_AOLxDion(momentum * momentum_buffer + (1 - momentum) * grad)
 
-    update_smoothing_buffer.copy_(update_smoothing * update_smoothing_buffer + (1 - update_smoothing) * v)
+    update_smoothing_buffer.copy_(
+        update_smoothing * update_smoothing_buffer + (1 - update_smoothing) * v
+    )
     v = update_smoothing_buffer
 
     acc_m_u32 = (acc_bf16_view_u16.to(torch.uint32) << 16) | mantissa.to(torch.uint32)
@@ -659,11 +661,23 @@ class Muon(torch.optim.Optimizer):
     """
 
     def __init__(
-        self, params, lr=0.02, weight_decay=0.01, momentum=0.95, update_smoothing=0.0, rank=0, world_size=1
+        self,
+        params,
+        lr=0.02,
+        weight_decay=0.01,
+        momentum=0.95,
+        update_smoothing=0.0,
+        rank=0,
+        world_size=1,
     ):
         self.rank = rank
         self.world_size = world_size
-        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, update_smoothing=update_smoothing)
+        defaults = dict(
+            lr=lr,
+            weight_decay=weight_decay,
+            momentum=momentum,
+            update_smoothing=update_smoothing,
+        )
         super().__init__(params, defaults)
         assert all(
             p.dtype == torch.bfloat16
@@ -1244,7 +1258,12 @@ inner_optimizers = [
     )
 ]
 inner_hidden_optim = Muon(
-    hidden_matrix_params, lr=0.03, momentum=0.95, update_smoothing=0.2, rank=rank, world_size=world_size
+    hidden_matrix_params,
+    lr=0.03,
+    momentum=0.95,
+    update_smoothing=0.2,
+    rank=rank,
+    world_size=world_size,
 )
 inner_optimizers += [inner_hidden_optim]
 outer_optim = Snoo(model, lr=0.68, momentum=0.37, k=28)
@@ -1268,7 +1287,10 @@ def get_lr(step: int):
     if x < 1 - args.cooldown_frac:
         return 1.0
     else:
-        return (1 - x) / args.cooldown_frac * (1 - args.final_lr_scale) + args.final_lr_scale
+        return (1 - x) / args.cooldown_frac * (
+            1 - args.final_lr_scale
+        ) + args.final_lr_scale
+
 
 # attention window size schedule: linearly increase
 @lru_cache(1)

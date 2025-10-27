@@ -112,6 +112,7 @@ def normalize_levy_dist(df: pd.DataFrame) -> pd.DataFrame:
         df.loc[mask, "dist"] = df.loc[mask, "levy_alpha"].apply(lambda a: f"levy-{a}")
     return df
 
+
 def aggregate_for_size(
     df: pd.DataFrame, runtime_col: str, error_col: str
 ) -> pd.DataFrame:
@@ -129,7 +130,8 @@ def aggregate_for_size(
 
     g = (
         df[keep]
-        .groupby(group_keys, as_index=False)[value_cols].median()
+        .groupby(group_keys, as_index=False)[value_cols]
+        .median()
         .sort_values(group_keys)
         .reset_index(drop=True)
     )
@@ -137,7 +139,6 @@ def aggregate_for_size(
     # If runtime_col was a group key (e.g., 'iter'), make sure it exists explicitly
     # (it will, via group_keys), so nothing to add. If it wasn't, it already exists via value_cols.
     return g
-
 
 
 def compute_pareto_front_minmin(df: pd.DataFrame, x: str, y: str) -> pd.DataFrame:
@@ -220,7 +221,9 @@ def plot_for_size(
 
     # ax.set_xlabel("time (ms)")
     # in plot_for_size(...)
-    xlab = "time (ms)" if runtime_col == "batch_time_ms" else runtime_col.replace("_", " ")
+    xlab = (
+        "time (ms)" if runtime_col == "batch_time_ms" else runtime_col.replace("_", " ")
+    )
     ax.set_xlabel(xlab)
     # set tick size to 1 if runtime_col is 'iter' (discrete)
     if runtime_col == "iter":
