@@ -60,11 +60,12 @@ On the cifar speedrun setup, we obtain similar final accuracies:
 
 | Model / Run | Mean Accuracy | Std Dev | Training Time Mean (s) | Iterations |
 | --- | --- | --- | --- | --- |
-| NS | 0.9401 | 0.0009 | 2.66 | 20 |
+| NS (7.5 epochs / 4 NS iters) | 0.9401 | 0.0009 | 2.51 | 20 |
+| NS (8 epochs / 3 NS iters) | 0.9401 | 0.0009 | 2.66 | 20 |
 | AOL + NS | 0.9401 | 0.0016 | 2.64 | 20 |
 
 This minor speedup is expected as the model is small, however, it does validate the equal capability of our approach to optimize
-the model. Also, we did not modify any hyperparameter from the baseline NS run to replicate this result.
+the model (even with fewer epochs). Also, we did not modify any hyperparameter from the baseline NS run to replicate this result.
 
 ## Citation
 

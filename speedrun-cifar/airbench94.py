@@ -57,7 +57,7 @@ parser.add_argument(
     help="Number of iterations for orthogonalization",
 )
 parser.add_argument(
-    "--epochs", type=int, default=8, help="Number of training epochs per run"
+    "--epochs", type=float, default=8, help="Number of training epochs per run"
 )
 parser.add_argument("--bias_lr", type=float, default=0.053)
 parser.add_argument("--head_lr", type=float, default=0.67)
