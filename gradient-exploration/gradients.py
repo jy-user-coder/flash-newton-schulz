@@ -5,7 +5,9 @@ from transformers import AutoTokenizer, DataCollatorForLanguageModeling
 from tqdm import tqdm
 
 from gpt import GPTConfig, GPT
-
+from ns_variants import MuonWithAuxAdam
+from ns_variants.reference import reference_ns
+from matplotlib.colors import LogNorm
 
 def build_tokenizer():
     tok = AutoTokenizer.from_pretrained("gpt2")
@@ -74,10 +76,15 @@ def _prep_grad_matrix(grad: torch.Tensor) -> torch.Tensor:
     g = grad / _l2(grad)
     return g
 
+def polar_error(UVh, X):
+    num = torch.linalg.norm(UVh - X, ord="fro")
+    denom = torch.linalg.norm(UVh, ord="fro")
+    return num/(denom+1e-8)
 
 def collect_stats_for_batch(
     model,
     batch,
+    optimizer,
     topk_svs=64,
     max_side=128,
 ):
@@ -93,10 +100,12 @@ def collect_stats_for_batch(
 
     out, loss = model(idx=batch["input_ids"], targets=batch["labels"])
     loss.backward()
+    val_loss = loss.item()    
 
     dict_svs = {}
     dict_gtg_small = {}
     dict_si_small = {}
+    dict_polar_err = {}
 
     for name, p in model.named_parameters():
         if p.grad is None:
@@ -106,12 +115,15 @@ def collect_stats_for_batch(
 
         # build normalized tall grad matrix g
         g = _prep_grad_matrix(p.grad.detach())
-
-        # singular values
         svs = torch.linalg.svdvals(g)
+        UVh = reference_ns(g) 
+
         if topk_svs is not None and svs.numel() > topk_svs:
             svs = svs[:topk_svs]
         dict_svs[name] = svs.detach().cpu().numpy()
+
+        if p.size(0) * 0.4 < p.size(1) < p.size(0) * 3.0:
+            dict_polar_err[name] = polar_error(UVh, optimizer.update_fn(g))
 
         # Gram = g^T g which is square (cols x cols)
         gtg = g.T @ g  # [d, d]
@@ -129,57 +141,12 @@ def collect_stats_for_batch(
     # free grads on GPU
     model.zero_grad(set_to_none=True)
 
-    return dict_svs, dict_gtg_small, dict_si_small
+    return dict_svs, dict_gtg_small, dict_si_small, dict_polar_err, {"loss":val_loss}
 
 
 # ----------------- plotting utils -----------------
 def safe_name(name: str) -> str:
     return name.replace(".", "_").replace("/", "_")
-
-
-def plot_svs_by_bs(dict_svs_by_bs, outpath):
-    """
-    dict_svs_by_bs:
-      {name: {bs: svs_array}}
-    Make a grid of line plots. Cheap in memory.
-    """
-    os.makedirs(os.path.dirname(outpath), exist_ok=True)
-
-    names = sorted(dict_svs_by_bs.keys())
-    n = len(names)
-    if n == 0:
-        return
-
-    ncols = min(3, n)
-    nrows = math.ceil(n / ncols)
-    fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(4 * ncols, 3.5 * nrows),
-        squeeze=False,
-        sharex=False,
-        sharey=False,
-    )
-
-    for i, name in enumerate(names):
-        ax = axes[i // ncols][i % ncols]
-        for bs in sorted(dict_svs_by_bs[name].keys()):
-            s = dict_svs_by_bs[name][bs]
-            x = np.arange(1, len(s) + 1)
-            ax.plot(x, np.sort(s)[::-1], label=f"bs={bs}")
-        ttl = name if len(name) <= 40 else name[:37] + "..."
-        ax.set_title(ttl, fontsize=8)
-        ax.set_xlabel("SV index")
-        ax.set_ylabel("SV")
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=6)
-    # delete any unused axes
-    for j in range(i + 1, nrows * ncols):
-        fig.delaxes(axes[j // ncols][j % ncols])
-
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=100)
-    plt.close(fig)
 
 
 def plot_gtg_by_step(dict_gtg_small_by_step, steps_all, outdir):
@@ -222,6 +189,57 @@ def plot_gtg_by_step(dict_gtg_small_by_step, steps_all, outdir):
         )
         plt.close(fig)
 
+def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
+    os.makedirs(os.path.dirname(outpath), exist_ok=True)
+
+    def _to_float(x):
+        try:
+            import torch
+            if isinstance(x, torch.Tensor):
+                x = x.detach().cpu()
+                return x.item() if x.numel() == 1 else float(x.mean().item())
+        except Exception:
+            pass
+        try:
+            import numpy as np
+            return float(np.asarray(x).mean())
+        except Exception:
+            return float(x)
+
+    # collect mean polar error per step
+    step_to_vals = {}
+    for name, by_step in dict_polar_err_by_step.items():
+        for st, val in by_step.items():
+            step_to_vals.setdefault(int(st), []).append(_to_float(val))
+
+    if not step_to_vals:
+        return
+
+    steps = sorted(step_to_vals.keys())
+    mean_pe = np.array([np.mean(step_to_vals[s]) for s in steps])
+
+    # extract loss per step; support {'loss': {step: loss}} or {step: loss}
+    if isinstance(dict_loss_by_step, dict) and "loss" in dict_loss_by_step and isinstance(dict_loss_by_step["loss"], dict):
+        loss_map = {int(k): _to_float(v) for k, v in dict_loss_by_step["loss"].items()}
+    else:
+        loss_map = {int(k): _to_float(v) for k, v in getattr(dict_loss_by_step, "items", lambda: [])()}
+
+    losses = np.array([loss_map.get(s, np.nan) for s in steps])
+
+    fig, ax = plt.subplots(figsize=(5.0, 3.6))
+    mask = np.isfinite(losses) & (losses > 0)
+    vmin = float(losses[mask].min()) if mask.any() else 1e-8
+    vmax = float(losses[mask].max()) if mask.any() else 1.0
+    sc = ax.scatter(steps, mean_pe, c=np.clip(losses, np.finfo(float).tiny, None), norm=LogNorm(vmin=vmin, vmax=vmax))
+    ax.plot(steps, mean_pe, linewidth=1.0)
+    ax.set_xlabel("step")
+    ax.set_ylabel("mean polar error")
+    ax.grid(True, alpha=0.3)
+    cbar = plt.colorbar(sc, ax=ax)
+    cbar.set_label("loss (log scale)")
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200, bbox_inches="tight", pad_inches=0.1)
+    plt.close(fig)
 
 def plot_si_over_steps(dict_si_by_step, outdir):
     """
@@ -255,6 +273,52 @@ def plot_si_over_steps(dict_si_by_step, outdir):
             pad_inches=0.1,
         )
         plt.close(fig)
+
+
+def plot_svs_by_bs(dict_svs_by_bs, outpath):
+    """
+    dict_svs_by_bs:
+      {name: {bs: svs_array}}
+    Make a grid of line plots. Cheap in memory.
+    """
+
+    names = sorted(dict_svs_by_bs.keys())
+    n = len(names)
+    if n == 0:
+        return
+
+    ncols = min(3, n)
+    nrows = math.ceil(n / ncols)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 3.5 * nrows),
+        squeeze=False,
+        sharex=False,
+        sharey=False,
+    )
+
+    for i, name in enumerate(names):
+        ax = axes[i // ncols][i % ncols]
+        for bs in sorted(dict_svs_by_bs[name].keys()):
+            s = dict_svs_by_bs[name][bs]
+            x = np.arange(1, len(s) + 1)
+            ax.plot(x, np.sort(s)[::-1], label=f"bs={bs}")
+        ttl = name if len(name) <= 40 else name[:37] + "..."
+        ax.set_title(ttl, fontsize=8)
+        ax.set_xlabel("SV index")
+        ax.set_ylabel("SV")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=6)
+    # delete any unused axes
+    for j in range(i + 1, nrows * ncols):
+        fig.delaxes(axes[j // ncols][j % ncols])
+
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=100)
+    plt.close(fig)
+
+
 
 
 def plot_svs_over_steps(dict_svs_by_step, outdir):
@@ -334,6 +398,12 @@ def main():
         default=64,
         help="Top-k singular values to store per matrix",
     )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default="standard",
+        choices=["aol", "standard"]
+    )
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -346,7 +416,20 @@ def main():
     collator = DataCollatorForLanguageModeling(tok, mlm=False)
 
     model = build_model().to(device).train()
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    groups_params = [
+        {
+            "params":[p for p in model.parameters() if p.ndim >= 2],
+            "use_muon":True,
+            "lr":0.02,
+        },
+        {
+            "params":[p for p in model.parameters() if p.ndim < 2],
+            "use_muon":False,
+            "lr":0.005,
+        },
+    ]
+    opt = MuonWithAuxAdam(groups_params, variant=args.variant)
     loader = DataLoader(ds, batch_size=16, shuffle=True, collate_fn=collator)
 
     # Prepare evaluation checkpoints
@@ -359,13 +442,17 @@ def main():
     dict_svs_by_step = {}  # {name: {step: svs_vec}}
     dict_gtg_small_by_step = {}  # {name: {step: gtg_small_mat}}
     dict_si_by_step = {}  # {name: {step: si_small_vec}}
+    dict_si_by_step = {}  # {name: {step: si_small_vec}}
+    dict_polar_err_by_step = {}
+    dict_loss_by_step = {}
 
     # Step 0 stats if requested
     if 0 in steps_eval:
         batch_fixed = one_batch(ds, args.fixed_eval_bs, device, collator)
-        svs0, gtg0, si0 = collect_stats_for_batch(
+        svs0, gtg0, si0, pol0, los0 = collect_stats_for_batch(
             model,
             batch_fixed,
+            opt,
             topk_svs=args.topk_svs,
             max_side=args.max_side,
         )
@@ -375,6 +462,10 @@ def main():
             dict_gtg_small_by_step.setdefault(name, {})[0] = arr
         for name, arr in si0.items():
             dict_si_by_step.setdefault(name, {})[0] = arr
+        for name, arr in pol0.items():
+            dict_polar_err_by_step.setdefault(name, {})[0] = arr
+        for name, arr in los0.items():
+            dict_loss_by_step.setdefault(name, {})[0] = arr
 
     # Train loop
     for step, batch in enumerate(loader, start=1):
@@ -391,9 +482,10 @@ def main():
 
         if step in steps_eval:
             batch_fixed = one_batch(ds, args.fixed_eval_bs, device, collator)
-            svs_ckpt, gtg_ckpt, si_ckpt = collect_stats_for_batch(
+            svs_ckpt, gtg_ckpt, si_ckpt, pol_ckpt, los_ckpt = collect_stats_for_batch(
                 model,
                 batch_fixed,
+                opt,
                 topk_svs=args.topk_svs,
                 max_side=args.max_side,
             )
@@ -404,22 +496,31 @@ def main():
                 dict_gtg_small_by_step.setdefault(name, {})[step] = arr
             for name, arr in si_ckpt.items():
                 dict_si_by_step.setdefault(name, {})[step] = arr
+            for name, arr in pol_ckpt.items():
+                dict_polar_err_by_step.setdefault(name, {})[step] = arr
+            for name, arr in los_ckpt.items():
+                dict_loss_by_step.setdefault(name, {})[step] = arr
+
+
+    # ----------------- plots -----------------
+    print("Plotting polar error across steps")
+    plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath="figs/polar_error_{args.variant}.png")
 
     # Batch size sweep (SVs only, cheap)
     print("Collecting SVs for different batch sizes...")
     for bs in tqdm([int(x) for x in args.eval_bs_list.split(",")]):
         model.train()
         batch = one_batch(ds, bs, device, collator)
-        svs_bs, _, _ = collect_stats_for_batch(
+        svs_bs, _, _, _, _ = collect_stats_for_batch(
             model,
             batch,
+            opt,
             topk_svs=args.topk_svs,
             max_side=args.max_side,
         )
         for name, arr in svs_bs.items():
             dict_svs_by_bs.setdefault(name, {})[bs] = arr
 
-    # ----------------- plots -----------------
     print("Plotting singular values vs batch size...")
     plot_svs_by_bs(dict_svs_by_bs, outpath="figs/svs_bs.png")
 
