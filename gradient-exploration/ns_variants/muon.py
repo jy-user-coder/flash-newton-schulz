@@ -17,12 +17,8 @@ from .flash_ns import (
     newton_schulz_triton_dion,
     newton_schulz_triton_aol,
 )
-import torch._dynamo as dynamo
-
-
-@dynamo.disable
-def _call(fn, x):
-    return fn(x)
+from .polar_express import polar_express
+from functools import partial
 
 
 @torch.compile
@@ -34,6 +30,7 @@ def muon_update(fn, grad, momentum, beta=0.95, nesterov=True):
     update = fn(update)
     update *= max(1, grad.size(-2) / grad.size(-1)) ** 0.5
     return update
+
 
 @torch.compile
 def adam_update(grad, buf1, buf2, step, betas, eps):
@@ -99,6 +96,8 @@ class MuonWithAuxAdam(torch.optim.Optimizer):
             "standard": newton_schulz_torch,
             "dion": newton_schulz_triton_dion,
             "aol": newton_schulz_triton_aol,
+            "polar_express_standard": polar_express,
+            "polar_express_aol": partial(polar_express, aol=True),
         }[variant]
         super().__init__(param_groups, dict())
 

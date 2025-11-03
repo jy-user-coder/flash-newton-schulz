@@ -9,6 +9,7 @@ from ns_variants import MuonWithAuxAdam
 from ns_variants.reference import reference_ns
 from matplotlib.colors import LogNorm
 
+
 def build_tokenizer():
     tok = AutoTokenizer.from_pretrained("gpt2")
     tok.pad_token = tok.eos_token
@@ -76,10 +77,12 @@ def _prep_grad_matrix(grad: torch.Tensor) -> torch.Tensor:
     g = grad / _l2(grad)
     return g
 
+
 def polar_error(UVh, X):
     num = torch.linalg.norm(UVh - X, ord="fro")
     denom = torch.linalg.norm(UVh, ord="fro")
-    return num/(denom+1e-8)
+    return num / (denom + 1e-8)
+
 
 def collect_stats_for_batch(
     model,
@@ -100,7 +103,7 @@ def collect_stats_for_batch(
 
     out, loss = model(idx=batch["input_ids"], targets=batch["labels"])
     loss.backward()
-    val_loss = loss.item()    
+    val_loss = loss.item()
 
     dict_svs = {}
     dict_gtg_small = {}
@@ -116,7 +119,7 @@ def collect_stats_for_batch(
         # build normalized tall grad matrix g
         g = _prep_grad_matrix(p.grad.detach())
         svs = torch.linalg.svdvals(g)
-        UVh = reference_ns(g) 
+        UVh = reference_ns(g)
 
         if topk_svs is not None and svs.numel() > topk_svs:
             svs = svs[:topk_svs]
@@ -141,7 +144,7 @@ def collect_stats_for_batch(
     # free grads on GPU
     model.zero_grad(set_to_none=True)
 
-    return dict_svs, dict_gtg_small, dict_si_small, dict_polar_err, {"loss":val_loss}
+    return dict_svs, dict_gtg_small, dict_si_small, dict_polar_err, {"loss": val_loss}
 
 
 # ----------------- plotting utils -----------------
@@ -189,12 +192,14 @@ def plot_gtg_by_step(dict_gtg_small_by_step, steps_all, outdir):
         )
         plt.close(fig)
 
+
 def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
     os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     def _to_float(x):
         try:
             import torch
+
             if isinstance(x, torch.Tensor):
                 x = x.detach().cpu()
                 return x.item() if x.numel() == 1 else float(x.mean().item())
@@ -202,6 +207,7 @@ def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
             pass
         try:
             import numpy as np
+
             return float(np.asarray(x).mean())
         except Exception:
             return float(x)
@@ -219,10 +225,17 @@ def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
     mean_pe = np.array([np.mean(step_to_vals[s]) for s in steps])
 
     # extract loss per step; support {'loss': {step: loss}} or {step: loss}
-    if isinstance(dict_loss_by_step, dict) and "loss" in dict_loss_by_step and isinstance(dict_loss_by_step["loss"], dict):
+    if (
+        isinstance(dict_loss_by_step, dict)
+        and "loss" in dict_loss_by_step
+        and isinstance(dict_loss_by_step["loss"], dict)
+    ):
         loss_map = {int(k): _to_float(v) for k, v in dict_loss_by_step["loss"].items()}
     else:
-        loss_map = {int(k): _to_float(v) for k, v in getattr(dict_loss_by_step, "items", lambda: [])()}
+        loss_map = {
+            int(k): _to_float(v)
+            for k, v in getattr(dict_loss_by_step, "items", lambda: [])()
+        }
 
     losses = np.array([loss_map.get(s, np.nan) for s in steps])
 
@@ -230,7 +243,12 @@ def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
     mask = np.isfinite(losses) & (losses > 0)
     vmin = float(losses[mask].min()) if mask.any() else 1e-8
     vmax = float(losses[mask].max()) if mask.any() else 1.0
-    sc = ax.scatter(steps, mean_pe, c=np.clip(losses, np.finfo(float).tiny, None), norm=LogNorm(vmin=vmin, vmax=vmax))
+    sc = ax.scatter(
+        steps,
+        mean_pe,
+        c=np.clip(losses, np.finfo(float).tiny, None),
+        norm=LogNorm(vmin=vmin, vmax=vmax),
+    )
     ax.plot(steps, mean_pe, linewidth=1.0)
     ax.set_xlabel("step")
     ax.set_ylabel("mean polar error")
@@ -240,6 +258,7 @@ def plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath):
     plt.tight_layout()
     plt.savefig(outpath, dpi=200, bbox_inches="tight", pad_inches=0.1)
     plt.close(fig)
+
 
 def plot_si_over_steps(dict_si_by_step, outdir):
     """
@@ -317,8 +336,6 @@ def plot_svs_by_bs(dict_svs_by_bs, outpath):
     plt.tight_layout()
     plt.savefig(outpath, dpi=100)
     plt.close(fig)
-
-
 
 
 def plot_svs_over_steps(dict_svs_by_step, outdir):
@@ -402,7 +419,7 @@ def main():
         "--variant",
         type=str,
         default="standard",
-        choices=["aol", "standard"]
+        choices=["aol", "standard", "polar_express_standard", "polar_express_aol"],
     )
     args = parser.parse_args()
 
@@ -419,14 +436,14 @@ def main():
 
     groups_params = [
         {
-            "params":[p for p in model.parameters() if p.ndim >= 2],
-            "use_muon":True,
-            "lr":0.02,
+            "params": [p for p in model.parameters() if p.ndim >= 2],
+            "use_muon": True,
+            "lr": 0.02,
         },
         {
-            "params":[p for p in model.parameters() if p.ndim < 2],
-            "use_muon":False,
-            "lr":0.005,
+            "params": [p for p in model.parameters() if p.ndim < 2],
+            "use_muon": False,
+            "lr": 0.005,
         },
     ]
     opt = MuonWithAuxAdam(groups_params, variant=args.variant)
@@ -501,10 +518,13 @@ def main():
             for name, arr in los_ckpt.items():
                 dict_loss_by_step.setdefault(name, {})[step] = arr
 
-
     # ----------------- plots -----------------
     print("Plotting polar error across steps")
-    plot_polar_error_steps(dict_polar_err_by_step, dict_loss_by_step, outpath="figs/polar_error_{args.variant}.png")
+    plot_polar_error_steps(
+        dict_polar_err_by_step,
+        dict_loss_by_step,
+        outpath=f"figs/polar_error_{args.variant}.png",
+    )
 
     # Batch size sweep (SVs only, cheap)
     print("Collecting SVs for different batch sizes...")

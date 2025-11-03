@@ -133,7 +133,7 @@ for rank in ranks_to_test:
 
     errors = [0 for _ in sizes]
     for i in range(num_avgs):
-        print(f"Running average {i+1}/{num_avgs} for rank {rank}...")
+        print(f"Running average {i + 1}/{num_avgs} for rank {rank}...")
         current_run_errors = [
             get_error_low_rank(size, rank if rank != "full" else size, device=device)
             for size in sizes

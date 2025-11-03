@@ -1,2 +1,12 @@
-python gradients.py --num_steps=100 --steps_eval_list=0,25,50,100,200 --fixed_eval_bs=32 --variant aol
-python gradients.py --num_steps=100 --steps_eval_list=0,25,50,100,200 --fixed_eval_bs=32 --variant standard
+python gradients.py --num_steps=300 \
+  --steps_eval_list=0,25,50,100,150,200,300 \
+  --fixed_eval_bs=32 --variant polar_express_aol
+python gradients.py --num_steps=300 \
+  --steps_eval_list=0,25,50,100,150,200,300 \
+  --fixed_eval_bs=32 --variant polar_express_standard
+python gradients.py --num_steps=300 \
+  --steps_eval_list=0,25,50,100,150,200,300 \
+  --fixed_eval_bs=32 --variant aol
+python gradients.py --num_steps=300 \
+  --steps_eval_list=0,25,50,100,150,200,300 \
+  --fixed_eval_bs=32 --variant standard
