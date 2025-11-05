@@ -81,14 +81,16 @@ coeffs_list = optimal_composition(
 
 
 @torch.compile
-def polar_express(G: torch.Tensor, steps: int = 5, aol=False) -> torch.Tensor:
+def polar_express(
+    G: torch.Tensor, steps: int = 5, epsilon: float = 1e-7, aol=False
+) -> torch.Tensor:
     assert G.ndim >= 2
     X = G.bfloat16()  # for speed
     if G.size(-2) > G.size(-1):
         X = X.mT  # this reduces FLOPs
 
     if not aol:
-        X = X / (X.norm(dim=(-2, -1), keepdim=True) * 1.01 + 1e-7)
+        X = X / (X.norm(dim=(-2, -1), keepdim=True) * 1.01 + epsilon)
         first_iter = False
     else:
         first_iter = True
@@ -99,7 +101,7 @@ def polar_express(G: torch.Tensor, steps: int = 5, aol=False) -> torch.Tensor:
 
         if first_iter:
             s = torch.rsqrt(
-                    torch.clamp_min(A.abs().sum(dim=1, keepdim=False), min=1e-8)
+                torch.clamp_min(A.abs().sum(dim=-1, keepdim=False), min=epsilon)
             )
             X = X * s.unsqueeze(-1)
             A = A * s.unsqueeze(-1) * s.unsqueeze(-2)

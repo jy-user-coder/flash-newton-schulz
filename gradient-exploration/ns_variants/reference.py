@@ -1,7 +1,7 @@
 import torch
 
 
-def reference_ns(G, steps=50, eps=1e-7):
+def reference_ns(G, steps=200, eps=1e-7):
     # Save original shape
     original_shape = G.shape
 
@@ -9,7 +9,7 @@ def reference_ns(G, steps=50, eps=1e-7):
     if G.ndim > 2:
         G = G.view(G.size(0), -1)
 
-    a, b, c = (3.4445, -4.7750, 2.0315)
+    a, b, c = (1.5, -0.5, 0.0) # For guaranteed convergence
     X = G.clone()
 
     # Ensure spectral norm is at most 1
