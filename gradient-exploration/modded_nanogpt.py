@@ -629,14 +629,17 @@ from ns_variants import polar_express
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--ns_impl", type=str, required=True, choices=["aol", "dion", "std_pe", "aol_pe", "muon"]
+    "--ns_impl",
+    type=str,
+    required=True,
+    choices=["aol", "dion", "std_pe", "aol_pe", "muon"],
 )
 parser.add_argument("--save_every", type=int, default=1000)
 cmd_args = parser.parse_args()
 
 ns_impl = {
     "aol": NS_AOLxDion,
-    "muon":newton_schulz_torch,
+    "muon": newton_schulz_torch,
     "dion": newton_schulz_triton_dion,
     "std_pe": partial(polar_express, aol=False),
     "aol_pe": partial(polar_express, aol=True),

@@ -1,10 +1,11 @@
 import torch
 
+
 def reference_ns(G, steps=200, eps=1e-7):
     # Save original shape
     original_shape = G.shape
 
-    a, b, c = (1.5, -0.5, 0.0) # For guaranteed convergence
+    a, b, c = (1.5, -0.5, 0.0)  # For guaranteed convergence
     X = G.clone()
 
     # Ensure spectral norm is at most 1

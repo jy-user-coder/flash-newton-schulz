@@ -16,6 +16,7 @@ import triton
 import triton.language as tl
 from torch import Tensor
 from aol_conv import aol_conv2d_rescale
+from polar_express import optimal_composition
 
 
 def _get_autotune_configs():
@@ -475,7 +476,7 @@ def ns_line_3(B: Tensor, X: Tensor, a: float, *, out: Tensor = None) -> Tensor:
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_muon_torch(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_muon_torch(G: Tensor, ns_consts: list, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Reference implementation of Newton-Schulz without Triton.
     """
@@ -491,8 +492,7 @@ def NS_muon_torch(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat1
     X = X / (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
 
     # for a, b, c in ns_consts:
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    for _ in range(iters):
+    for a, b, c in ns_consts:
         A = X @ X.mT
         B = b * A + c * (A @ A)
         X = a * X + B @ X
@@ -503,7 +503,7 @@ def NS_muon_torch(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat1
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_muon_triton(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_muon_triton(G: Tensor, ns_consts: list, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -512,7 +512,7 @@ def NS_muon_triton(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat
         G = G.reshape(G.size(0), -1)
 
     # Newton-Schulz constants
-    a, b, c = (3.4445, -4.7750, 2.0315)
+    a, b, c = ns_consts[0]
 
     X = G.to(dtype=dtype)
     if G.size(-2) > G.size(-1):
@@ -530,7 +530,7 @@ def NS_muon_triton(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat
     ns_line_3 = torch.baddbmm if X.ndim > 2 else torch.addmm
 
     # Perform the NS iterations
-    for _ in range(iters):
+    for a, b, c in ns_consts[1:]:
         ns_line_1(X, out=A)  # A = X @ X.mT
         ns_line_2(A, alpha=c, beta=b, out=B)  # B = b * A + c * A @ A
         ns_line_3(X, B, X, beta=a, out=C)  # C = a * X + B @ X
@@ -542,22 +542,13 @@ def NS_muon_triton(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_dion(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_dion(G: Tensor, ns_consts, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
     # Add this guardrail
     if G.ndim == 4:
         G = G.reshape(G.size(0), -1)
-
-    # Newton-Schulz constants
-    ns_consts = [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ][-iters:]
 
     X = G.to(dtype=dtype)
     if G.size(-2) > G.size(-1):
@@ -587,7 +578,7 @@ def NS_dion(G: Tensor, iters=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_aol_standard(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_aol_standard(G: Tensor, ns_consts, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -597,15 +588,6 @@ def NS_aol_standard(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloa
     else:
         X = G
     X = X.to(dtype=dtype)
-
-    # Newton-Schulz constants
-    ns_consts = [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ][-iters:]
 
     if G.size(-2) > G.size(-1):
         X = X.mT
@@ -649,18 +631,10 @@ def NS_aol_standard(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloa
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_aol_conv(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_aol_conv(G: Tensor, ns_consts, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
-    # Newton-Schulz constants
-    ns_consts = [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ][-iters:]
     X = G.to(dtype=dtype)
 
     if G.ndim == 4:
@@ -709,14 +683,4 @@ def NS_aol_conv(G: Tensor, iters=4, epsilon: float = 1e-7, dtype=torch.bfloat16)
     if G.size(-2) > G.size(-1):
         X = X.mT
     return X
-
-if __name__ == "__main__":
-    errs = []
-    X = torch.randn((10, 32, 32), device="cuda", dtype=torch.bfloat16)
-    Y = NS_aol_standard(X, iters=4)
-    for x, y in zip(X, Y):
-        U, S, Vh = torch.linalg.svd(x.float())
-        Q = U @ Vh
-        errs.append(torch.linalg.norm(Q - y, ord='fro') / torch.linalg.norm(Q, ord='fro'))
-    print("Avg relative frobenius error over 10 matrices:", torch.stack(errs).mean().item())
 

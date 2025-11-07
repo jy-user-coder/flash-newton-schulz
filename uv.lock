@@ -131,6 +131,7 @@ dependencies = [
     { name = "datasets" },
     { name = "imageio" },
     { name = "ipython" },
+    { name = "kernels" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
@@ -145,6 +146,7 @@ requires-dist = [
     { name = "datasets", specifier = ">=4.3.0" },
     { name = "imageio", specifier = ">=2.37.0" },
     { name = "ipython", specifier = ">=9.6.0" },
+    { name = "kernels", specifier = ">=0.11.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "numpy", specifier = ">=2.3.4" },
     { name = "scipy", specifier = ">=1.16.2" },
@@ -675,6 +677,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899, upload-time = "2025-03-05T20:05:00.369Z" },
+]
+
+[[package]]
+name = "kernels"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "packaging" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/be/bfb25bb3c0110fc87d9f0b1de3a50956347cf2988b2cf1b5fe64fd3585cf/kernels-0.11.0.tar.gz", hash = "sha256:2f77a6ec3f7eabf26335bd601460dd19b7e95d7842d1f0a9124b487e33f33205", size = 47517, upload-time = "2025-10-31T10:46:27.609Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/07/67a081386c767d224298800237ea89f8fe6097c01dbaca6f4ba31f959306/kernels-0.11.0-py3-none-any.whl", hash = "sha256:1638dc4cafc0596d3086f0b4c8a17236c007e09d35711e1e05bcd7819175d3de", size = 40498, upload-time = "2025-10-31T10:46:25.75Z" },
 ]
 
 [[package]]
@@ -1472,6 +1488,7 @@ wheels = [
 name = "pyarrow"
 version = "22.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/53/04a7fdc63e6056116c9ddc8b43bc28c12cdd181b85cbeadb79278475f3ae/pyarrow-22.0.0.tar.gz", hash = "sha256:3d600dc583260d845c7d8a6db540339dd883081925da2bd1c5cb808f720b3cd9", size = 1151151, upload-time = "2025-10-24T12:30:00.762Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/63/ba23862d69652f85b615ca14ad14f3bcfc5bf1b99ef3f0cd04ff93fdad5a/pyarrow-22.0.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:bea79263d55c24a32b0d79c00a1c58bb2ee5f0757ed95656b01c0fb310c5af3d", size = 34211578, upload-time = "2025-10-24T10:05:21.583Z" },
     { url = "https://files.pythonhosted.org/packages/b1/d0/f9ad86fe809efd2bcc8be32032fa72e8b0d112b01ae56a053006376c5930/pyarrow-22.0.0-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:12fe549c9b10ac98c91cf791d2945e878875d95508e1a5d14091a7aaa66d9cf8", size = 35989906, upload-time = "2025-10-24T10:05:29.485Z" },

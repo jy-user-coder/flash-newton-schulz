@@ -16,6 +16,7 @@ with open(sys.argv[0]) as f:
     code = f.read()
 import uuid
 from math import ceil
+from polar_express import optimal_composition
 
 import torch
 from torch import nn
@@ -77,6 +78,10 @@ ortho_fn = {
 }[args.ns_variant]
 
 
+coeffs_list = optimal_composition(
+    l=1e-3, num_iters=args.iters_ortho, safety_factor_eps=1e-2, cushion=0.02
+)
+
 class Muon(torch.optim.Optimizer):
     def __init__(self, params, lr=1e-3, momentum=0, nesterov=False):
         if lr < 0.0:
@@ -105,7 +110,7 @@ class Muon(torch.optim.Optimizer):
                 g = g.add(buf, alpha=momentum) if group["nesterov"] else buf
 
                 p.data.mul_(len(p.data) ** 0.5 / p.data.norm())  # normalize the weight
-                update = ortho_fn(g, iters=args.iters_ortho).view(
+                update = ortho_fn(g, coeffs_list).view(
                     g.shape
                 )  # whiten the update
                 p.data.add_(update, alpha=-lr)  # take a step
