@@ -66,6 +66,8 @@ parser.add_argument("--lr_muon", type=float, default=0.24)
 parser.add_argument("--m_muon", type=float, default=0.6)
 parser.add_argument("--wd", type=float, default=2e-6)
 parser.add_argument("--batch_size", type=int, default=2000, help="Training batch size")
+parser.add_argument("--polar_every", type=int, default=10, help="Compute polar error every") 
+parser.add_argument("--compile", action="store_true")
 
 args = parser.parse_args()
 
@@ -78,9 +80,21 @@ ortho_fn = {
 }[args.ns_variant]
 
 
-coeffs_list = optimal_composition(
-    l=1e-3, num_iters=args.iters_ortho, safety_factor_eps=1e-2, cushion=0.02
+l_base = 1e-3 if args.ns_variant != "aol_standard" else 2e-2
+coeffs_list_safe = optimal_composition(
+    l=1e-3, num_iters=70, safety_factor_eps=1e-3, cushion=0.02
 )
+coeffs_list_base = optimal_composition(
+    l=l_base, num_iters=70, safety_factor_eps=1e-3, cushion=0.02
+)
+coeffs_list_iter = optimal_composition(
+    l=l_base, num_iters=args.iters_ortho, safety_factor_eps=1e-3, cushion=0.02
+)
+
+def compute_polar_error(ref, approx):
+    num = torch.linalg.norm(ref - approx, ord="fro", dim=(-2, -1))
+    denom = torch.linalg.norm(ref, ord="fro", dim=(-2, -1)) + 1e-6
+    return (num / denom).mean()
 
 class Muon(torch.optim.Optimizer):
     def __init__(self, params, lr=1e-3, momentum=0, nesterov=False):
@@ -93,7 +107,8 @@ class Muon(torch.optim.Optimizer):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov)
         super().__init__(params, defaults)
 
-    def step(self):
+    def step(self, polar_error=False):
+        epsilon_bias, epsilon_speed, cpt = 0, 0, 0
         for group in self.param_groups:
             lr = group["lr"]
             momentum = group["momentum"]
@@ -110,10 +125,28 @@ class Muon(torch.optim.Optimizer):
                 g = g.add(buf, alpha=momentum) if group["nesterov"] else buf
 
                 p.data.mul_(len(p.data) ** 0.5 / p.data.norm())  # normalize the weight
-                update = ortho_fn(g, coeffs_list).view(
-                    g.shape
-                )  # whiten the update
+                update = ortho_fn(g, coeffs_list_iter)
+                if polar_error:
+                    q = NS_muon_torch(g, coeffs_list_safe)
+                    if args.ns_variant == "aol_standard":
+                        q_bias = NS_aol_standard(g, coeffs_list_base)
+                        epsilon_bias += compute_polar_error(q_bias, q)
+                        epsilon_speed += compute_polar_error(q_bias, update)
+                    else:
+                        epsilon_bias += 0 
+                        epsilon_speed += compute_polar_error(q, update)
+                    cpt += 1
+                else:
+                    epsilon_bias, epsilon_speed = None, None
+                update = update.view(g.shape)
                 p.data.add_(update, alpha=-lr)  # take a step
+
+        if epsilon_bias is not None and epsilon_speed is not None:
+            epsilon_bias, epsilon_speed = (
+                epsilon_bias/cpt, epsilon_speed/cpt
+            )
+
+        return epsilon_bias, epsilon_speed
 
 
 #############################################
@@ -494,6 +527,7 @@ def main(run, model):
     # Initialize the whitening layer using training images
     start_timer()
     train_images = train_loader.normalize(train_loader.images[:5000])
+    eps_bias, eps_speed = [], []
     model.init_whiten(train_images)
     stop_timer()
 
@@ -514,7 +548,16 @@ def main(run, model):
             for group in optimizer1.param_groups[1:] + optimizer2.param_groups:
                 group["lr"] = group["initial_lr"] * (1 - step / total_train_steps)
             for opt in optimizers:
-                opt.step()
+                if isinstance(opt, Muon):
+                    polar_error = (step % args.polar_every) == 0
+                    bias, speed = opt.step(polar_error=polar_error)
+                    if polar_error and bias is not None:
+                        eps_bias.append(bias)
+                        eps_speed.append(speed)
+                else:
+                    opt.step()
+
+
             model.zero_grad(set_to_none=True)
             step += 1
             if step >= total_train_steps:
@@ -530,6 +573,28 @@ def main(run, model):
         val_acc = evaluate(model, test_loader, tta_level=0)
         print_training_details(locals(), is_final_entry=False)
         run = None  # Only print the run number once
+
+    import pandas as pd
+
+    os.makedirs("results", exist_ok=True)
+    log_dict = {
+        "val_acc": val_acc,
+        "num_iters_ortho": args.iters_ortho,
+        "epsilon_speed": np.array(eps_speed).mean() if len(eps_speed) > 0 else None,
+        "epsilon_bias": np.array(eps_bias).mean() if len(eps_bias) > 0 else None,
+    }
+    df = pd.DataFrame([log_dict])
+    log_path = os.path.join(
+        "results",
+        f"airbench94_muon_{args.ns_variant}_runs{args.n_runs}_iters{args.iters_ortho}.csv",
+    )
+    if not os.path.exists(log_path):
+        df.to_csv(log_path, index=False)
+    else:
+        df_old = pd.read_csv(log_path)
+        df_new = pd.concat([df_old, df], ignore_index=True)
+        df_new.to_csv(log_path, index=False)
+
 
     ####################
     #  TTA Evaluation  #
@@ -547,7 +612,8 @@ def main(run, model):
 if __name__ == "__main__":
     # We re-use the compiled model between runs to save the non-data-dependent compilation time
     model = CifarNet().cuda().to(memory_format=torch.channels_last)
-    model.compile(mode="max-autotune")
+    if args.compile:
+        model.compile(mode="max-autotune")
 
     print_columns(logging_columns_list, is_head=True)
     main("warmup", model)
