@@ -23,6 +23,7 @@ from torch import nn
 import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as T
+import numpy as np
 
 torch.backends.cudnn.benchmark = True
 
@@ -67,7 +68,7 @@ parser.add_argument("--m_muon", type=float, default=0.6)
 parser.add_argument("--wd", type=float, default=2e-6)
 parser.add_argument("--batch_size", type=int, default=2000, help="Training batch size")
 parser.add_argument("--polar_every", type=int, default=10, help="Compute polar error every") 
-parser.add_argument("--compile", action="store_true")
+parser.add_argument("--no_compile", action="store_false")
 
 args = parser.parse_args()
 
@@ -80,21 +81,26 @@ ortho_fn = {
 }[args.ns_variant]
 
 
-l_base = 1e-3 if args.ns_variant != "aol_standard" else 2e-2
+l_base = 1e-3 if args.ns_variant != "aol_standard" else 5e-3
 coeffs_list_safe = optimal_composition(
-    l=1e-3, num_iters=70, safety_factor_eps=1e-3, cushion=0.02
+    l=1e-3, num_iters=70, safety_factor_eps=1e-2, cushion=0.02
 )
 coeffs_list_base = optimal_composition(
-    l=l_base, num_iters=70, safety_factor_eps=1e-3, cushion=0.02
+    l=l_base, num_iters=70, safety_factor_eps=1e-2, cushion=0.02
 )
 coeffs_list_iter = optimal_composition(
-    l=l_base, num_iters=args.iters_ortho, safety_factor_eps=1e-3, cushion=0.02
+    l=l_base, num_iters=args.iters_ortho, safety_factor_eps=1e-2, cushion=0.02
 )
 
 def compute_polar_error(ref, approx):
     num = torch.linalg.norm(ref - approx, ord="fro", dim=(-2, -1))
     denom = torch.linalg.norm(ref, ord="fro", dim=(-2, -1)) + 1e-6
-    return (num / denom).mean()
+    return (num / denom).mean().to(torch.float32).cpu().numpy()
+
+def compute_epsilon_speed_aol(approx, ref, bias):
+    num = torch.linalg.norm(approx - bias, ord="fro", dim=(-2, -1))
+    denom = torch.linalg.norm(ref, ord="fro", dim=(-2, -1)) + 1e-6
+    return (num / denom).mean().to(torch.float32).cpu().numpy()
 
 class Muon(torch.optim.Optimizer):
     def __init__(self, params, lr=1e-3, momentum=0, nesterov=False):
@@ -131,7 +137,7 @@ class Muon(torch.optim.Optimizer):
                     if args.ns_variant == "aol_standard":
                         q_bias = NS_aol_standard(g, coeffs_list_base)
                         epsilon_bias += compute_polar_error(q_bias, q)
-                        epsilon_speed += compute_polar_error(q_bias, update)
+                        epsilon_speed += compute_epsilon_speed_aol(update, q, q_bias)
                     else:
                         epsilon_bias += 0 
                         epsilon_speed += compute_polar_error(q, update)
@@ -574,11 +580,21 @@ def main(run, model):
         print_training_details(locals(), is_final_entry=False)
         run = None  # Only print the run number once
 
+    ####################
+    #  TTA Evaluation  #
+    ####################
+
+    start_timer()
+    tta_val_acc = evaluate(model, test_loader, tta_level=2)
+    stop_timer()
+    epoch = "eval"
+    print_training_details(locals(), is_final_entry=True)
+
     import pandas as pd
 
     os.makedirs("results", exist_ok=True)
     log_dict = {
-        "val_acc": val_acc,
+        "val_acc": tta_val_acc,
         "num_iters_ortho": args.iters_ortho,
         "epsilon_speed": np.array(eps_speed).mean() if len(eps_speed) > 0 else None,
         "epsilon_bias": np.array(eps_bias).mean() if len(eps_bias) > 0 else None,
@@ -595,24 +611,13 @@ def main(run, model):
         df_new = pd.concat([df_old, df], ignore_index=True)
         df_new.to_csv(log_path, index=False)
 
-
-    ####################
-    #  TTA Evaluation  #
-    ####################
-
-    start_timer()
-    tta_val_acc = evaluate(model, test_loader, tta_level=2)
-    stop_timer()
-    epoch = "eval"
-    print_training_details(locals(), is_final_entry=True)
-
     return tta_val_acc
 
 
 if __name__ == "__main__":
     # We re-use the compiled model between runs to save the non-data-dependent compilation time
     model = CifarNet().cuda().to(memory_format=torch.channels_last)
-    if args.compile:
+    if not args.no_compile:
         model.compile(mode="max-autotune")
 
     print_columns(logging_columns_list, is_head=True)
