@@ -14,9 +14,9 @@
 
 # On the modded-nanogpt setup
 # torchrun --nproc_per_node=4 modded_nanogpt.py --ns_impl dion --save_every 200
-# torchrun --nproc_per_node=4 modded_nanogpt.py --ns_impl aol --save_every 200
+torchrun --nproc_per_node=4 modded_nanogpt.py --ns_impl aol --save_every 200
 # torchrun --nproc_per_node=4 modded_nanogpt.py --ns_impl std_pe --save_every 200
 # torchrun --nproc_per_node=4 modded_nanogpt.py --ns_impl muon --save_every 200
 
 # To get the plot
-# python plot_gpt.py
+python plot_gpt.py
