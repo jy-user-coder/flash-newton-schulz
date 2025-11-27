@@ -1,76 +1,76 @@
-# Turbocharging Newton-Schulz with AOL Rescaling and Triton Kernels
+# Turbocharging Muon via AOL Preconditioning
 
-Our attempt to improve the speed of the newton schulz algorithm, starting from the dion implementation.
+![Figure 1: Using Turbo-Muon allows speedups on large and small matrices compared to naive Muon implementations and even to better
+optimized versions such as Dion (denoted as `Muon+` here).](assets/banner_turbo_muon.png)
 
-Disclaimer: this work is still in progress, especially we want to highlight that this approach change the 
-underlying algorithm. So extra verification should be done before integrating it in optimizers like dion/muon.
+Orthogonality-Based Optimization via optimizers like Muon relies on iterative orthogonalisation procedures. 
+These steps are designed to approximate the closest orthogonal matrix to the gradient in Frobenius norm before
+the weight update. This mechanism is the main driver of performance on speed training tasks and also shows benefits
+on large scale tasks. 
 
-## Changes
+In this repository, we provide a codebase for accelerating the Muon optimizer via gradient preconditioning. 
+Our work leverages the AOL parametrization method to ensure we reach better approximations of the orthogonalized gradients
+in less iterative steps. Moreover, the main cost of the AOL parametrization method can be fused with the original iterative 
+scheme of Newton-Schulz orthogonalisation. 
 
-For this implementation we started from the [dion implementation of newton schulz](https://github.com/microsoft/dion)
-which has a great triton implementation of the newton schulz algorithm.
+Here, we provide a standalone torch implementation of our Turbo-Muon variant along with custom triton kernels to double the 
+speed of a naive implementation on medium to large matrices (c.f, Fig 1). Our standalone version on the Muon optimizer is provided
+in the `turbo_muon.py` file, whereas the custom triton kernels are provided in the `newton_schulz_triton.py` file.
 
-### triton kernel for ns_line_3:
+## Building upon existing Triton kernels
 
-We noticed that the ns_line_3 function was taking a lot of time, so we wrote a triton kernel to avoid multiple
-loadings of the same data. This give a marginal speedup on small matrices, where loading data is the bottleneck.
+For this implementation, we started from the brilliant [implementation of Newton-Schulz](https://github.com/microsoft/dion) from the Dion paper,
+which provides custom triton kernels for the NS algorithm.
+
+### Triton Kernel for `ns_line_3`:
+
+We noticed that the `ns_line_3` function was taking a lot of time, so we wrote a triton kernel to avoid multiple
+loadings of the same data. This gave a marginal speedup on small matrices, where loading data is the bottleneck.
 
 ### Fewer iterations:
 
-We remove the previous normalization to switch to AOL rescaling
-Which is further explained in the paper: https://arxiv.org/pdf/2208.03160
+We remove the previous normalization to switch to AOL rescaling of Prach and Lampert.
+Which is further explained in this [paper](https://arxiv.org/pdf/2208.03160).
 
-This consists in computing W@W^t using ns_line_1 and then computing the
-scaling factors: fast_inv_sqrt(reduce_sum(abs(WW^t), axis=-1)) which is a vector
+This preconditioning leverages the existing computation of W@W^t in `ns_line_1` and then computes the
+scaling factors via: `fast_inv_sqrt(reduce_sum(abs(WW^t), axis=-1))` which yields a vector of column rescaling which we
+apply both to W and W@W^t. This introduces twofold benefits: first, this ensures that the NS iterations will now converge 
+since the rescaled matrix now has singular values that are all inferior to one, secondly, this also makes the gradient closer
+to orthogonality.
 
-Since the main operation to compute those correspond to ns_line_1,
-we can fuse it with the first newton schulz iterate. Furthermore this gives a better
-starting point for the newton schulz iterations as the matrix is closer to orthogonal
-
-Thanks to this, we can save one iteration of newton schulz. However, the non linear nature of AOL prevents us from
+Thanks to this, we can save one iteration of Newton-Schulz approximation. However, the non linear nature of AOL prevents us from
 using Jiacheng's approach to compute new polynomials factors. So we proposed two approaches to optimize our NS coeffs,
-via polynomial approximation of AOL's effect or genetic algorithms. This is done in the directory `hp_opt`.
+via polynomial approximation of AOL's effect or genetic algorithms. This is done in the directory `hp_opt`. We found both approaches 
+to yield marginal gains and therefore use standard Muon coefficients which yield very good performance.
 
 ### Current work:
 
-First, we need to make sure our implementation is not changing the nature of the underlying iterative computation.
-Indeed, AOL rescaling has an effect of the polar factor of the matrix $U.V^T$ we are trying to compute. However,
-when matrices are relatively close to being column-orthogonal (which is mostly the case in high dimensions), 
-meaning this effect is small compared to the approximation error of the baseline NS algorithm.
+In our work, we provide several contributions:
 
-This is checked empirically in a GPT-2 like training setup in the `gradient-exploration` directory.
+- First, we show that AOL preconditioning makes NS converge to better estimates of the PolarFactor in usual
+practical training regimes.
+- Then, we also demonstrate the slight bias AOL preconditioning introduces recovers a steepest descent direction as per
+the theoretical framework of [Old Optimizer, New Norm](https://arxiv.org/abs/2409.20325).
+- Finally, we validate the better speed and convergence of our method by improving the speedrunning records that use the Muon
+optimizer on both the `modded-nano-gpt` tasks and on `CIFAR-10` classification.
 
-### Empirical validation:
+### Directories and Structure:
 
-In order to validate the suitability of this approach for orthogonality based optimizers, we run benchmarks 
-on both the nanogpt and cifar speedrun setups, as implemented in `speedrun-nanogpt` and `speedrun-cifar` directories
-respectively.
+In the repository, we included standalone code implementations for both the torch optimizer that uses Muon with or without 
+AOL preconditioning, along with custom triton kernels that allow for blazingly fast orthogonalization.
 
-## Current results:
-
-Using a L40S GPU, we obtain a decent speedup:
-
-![speedup graph](assets/speedup_evaluation.png)
-
-When tested on random uniform matrices, the matrices seems closer to orthogonal:
-
-![orthogonality graph](assets/svs_2048x2048.png)
-
-On the cifar speedrun setup, we obtain similar final accuracies:
-
-| Model / Run | Mean Accuracy | Std Dev | Training Time Mean (s) | Iterations |
-| --- | --- | --- | --- | --- |
-| NS (7.5 epochs / 4 NS iters) | 0.9401 | 0.0009 | 2.51 | 20 |
-| NS (8 epochs / 3 NS iters) | 0.9401 | 0.0009 | 2.66 | 20 |
-| AOL + NS | 0.9401 | 0.0016 | 2.64 | 20 |
-
-This minor speedup is expected as the model is small, however, it does validate the equal capability of our approach to optimize
-the model (even with fewer epochs). Also, we did not modify any hyperparameter from the baseline NS run to replicate this result.
+In the `paper_exps` directory, you will find our research code regarding:
+- The better orthogonalization performance of AOL preconditioning (in `paper_exps/figures`).
+- An empirical exploration of the slight bias introduced by preconditioning on real GPT like transformer gradients (in `paper_exps/gradient_exploration`).
+- An exploration of polynomial and genetic NS coefficient optimization strategies (in `paper_exps/hp_opt`).
+- The speedrunning improvements on both the CIFAR-10 dataset (`paper_exps/speedrun-cifar`) and the modded-nanogpt task (`paper_exps/speedrun-nanogpt`).
 
 ## Citation
 
+Our paper will be made public soon. In the meantime, please consider citing this repository.
+
 ```
-@misc{lin2025flash,
+@misc{boissin2025turbocode,
   author       = {Thibaut Boissin and Thomas Massena},
   title        = {flash-newton-schulz: AOL rescaling and triton kernel for newton schulz},
   year         = {2025},
