@@ -585,7 +585,7 @@ def ns_line_3(B: Tensor, X: Tensor, a: float, *, out: Tensor = None) -> Tensor:
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def ns_AOLxDion(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def ns_AOLxMuon_plus(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -665,7 +665,7 @@ def NS_muon(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
 
 
 @torch.compile(dynamic=False, fullgraph=True)
-def NS_dion(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+def NS_muon_plus(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -1729,7 +1729,7 @@ parser.add_argument(
     "--ns-impl",
     type=str,
     default="muon",
-    choices=["muon", "dion", "aol_dion"],
+    choices=["muon", "muon+", "aol_muon+"],
     help="Type of Newton-Schulz implementation to use",
 )
 parser.add_argument(
@@ -1742,8 +1742,8 @@ cmd_args = parser.parse_args()
 
 ns_impls = {
     "muon": NS_muon,
-    "dion": NS_dion,
-    "aol_dion": ns_AOLxDion,
+    "muon+": NS_muon_plus,
+    "aol_muon+": ns_AOLxMuon_plus,
 }
 
 newton_schulz_impl = ns_impls[cmd_args.ns_impl]
