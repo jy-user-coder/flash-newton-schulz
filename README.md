@@ -56,7 +56,7 @@ removing one iteration out of 5 also improves runtime (2.8x faster).
 
 This ultimately leads to a better compromise between polar error and runtime.
 
-<img src="assets/pareto/pareto_size8192.png" alt="Polar error vs time comparison" width="340" />
+<img src="assets/pareto_size8192.png" alt="Polar error vs time comparison" width="340" />
 
 ### Drop in in nanogpt speedrun
 
@@ -80,8 +80,7 @@ On the cifar speedrun setup, we obtain similar final accuracies:
 
 | Model / Run | Mean Accuracy | Std Dev | Training Time Mean (s) | Iterations |
 | --- | --- | --- | --- | --- |
-| NS (7.5 epochs / 4 NS iters) | 0.9401 | 0.0009 | 2.51 | 20 |
-| NS (8 epochs / 3 NS iters) | 0.9401 | 0.0009 | 2.66 | 20 |
+| NS  | 0.9401 | 0.0009 | 2.66 | 20 |
 | AOL + NS | 0.9401 | 0.0016 | 2.64 | 20 |
 
 This minor speedup is expected as the model is small, however, it does validate the equal capability of our approach to optimize
