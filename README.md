@@ -1,10 +1,19 @@
 # Turbocharging Newton-Schulz with AOL Rescaling and Triton Kernels
 
-Our attempt to improve the speed of the newton schulz algorithm.
+> Code for the paper: "Turbo-Muon: Accelerating Orthogonality-Based Optimization with Pre-Conditioning"
+
+TLDR: Orthogonality improving gradient preconditioning allows the removal of one costly Newton-Schulz iteration.
+
+## Standalone code
+
+In this repository, we provide the following standalone implementations:
+- A custom triton implementation of the Newton-Schulz iterative steps (in `newton_schulz_triton.py`).
+- An AOL preconditioned version of the Muon optimizer in the `torch.optim` format (in `turbo_muon_torch.py`).
+- An AOL preconditioned version of the Muon optimizer in the `optax` format (in `turbo_muon_optax.py`).
 
 ## Changes
 
-For this implementation we started from the [implementation of newton schulz shipped aside the dion optimizer](https://github.com/microsoft/dion)
+For the triton kernel implementation we started from the [implementation of newton schulz shipped aside the dion optimizer](https://github.com/microsoft/dion)
 which has a great triton implementation of the newton schulz algorithm.
 
 ### Fewer iterations:
