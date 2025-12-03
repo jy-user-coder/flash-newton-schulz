@@ -11,6 +11,13 @@ In this repository, we provide the following standalone implementations:
 - An AOL preconditioned version of the Muon optimizer in the `torch.optim` format (in `turbo_muon_torch.py`).
 - An AOL preconditioned version of the Muon optimizer in the `optax` format (in `turbo_muon_optax.py`).
 
+If needed the newton schulz routines can be used independently with the `kernel` library:
+```python
+from kernels import get_kernel                                                               
+kern = get_kernel("tboissin/newton_schulz_triton")                                           
+newton_schulz = torch.compile(kern.newton_schulz) # optionally compile with torch.compile    
+```
+
 ## Changes
 
 For the triton kernel implementation we started from the [implementation of newton schulz shipped aside the dion optimizer](https://github.com/microsoft/dion)

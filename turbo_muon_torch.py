@@ -1,53 +1,62 @@
 import torch
 import torch.distributed as dist
 
+try:
+    from kernels import get_kernel
+    kern = get_kernel("tboissin/newton_schulz_triton")
+    newton_schulz = torch.compile(kern.newton_schulz) # optionally compile with torch.compile
+except ImportError as e:
+    print("Warning: could not import newton_schulz_triton kernels, falling back to PyTorch implementation.")
 
-def ns_iterations(G, aol: bool, steps: int, epsilon=1e-6):
-    """
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
-    quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
-    of minimizing steps, it turns out to be empirically effective to keep increasing the slope at
-    zero even beyond the point where the iteration no longer converges all the way to one everywhere
-    on the interval. This iteration therefore does not produce UV^T but rather something like US'V^T
-    where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
-    performance at all relative to UV^T, where USV^T = G is the SVD.
-    """
-    assert G.ndim >= 2 # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
-    a, b, c = (3.4445, -4.7750,  2.0315)
-    X = G.bfloat16()
-    if G.size(-2) > G.size(-1):
-        X = X.mT
+    def newton_schulz(G, iter=4, precondition=True, epsilon: float = 1e-7, dtype=torch.bfloat16):
+        """
+        Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
+        quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
+        of minimizing steps, it turns out to be empirically effective to keep increasing the slope at
+        zero even beyond the point where the iteration no longer converges all the way to one everywhere
+        on the interval. This iteration therefore does not produce UV^T but rather something like US'V^T
+        where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
+        performance at all relative to UV^T, where USV^T = G is the SVD.
+        """
+        assert G.ndim >= 2
+        ns_consts = [
+            (4.0848, -6.8946, 2.9270),
+            (3.9505, -6.3029, 2.6377),
+            (3.7418, -5.5913, 2.3037),
+            (2.8769, -3.1427, 1.2046),
+            (2.8366, -3.0525, 1.2012),
+        ][-iter:]
+        X = G.to(dtype=dtype)
+        if G.size(-2) > G.size(-1):
+            X = X.mT
 
-    if not aol:
-        X /= (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
+        if not precondition:
+            X /= (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
 
-    # Perform the NS iterations
-    for i in range(steps):
-        A = X @ X.mT
+        # Perform the NS iterations
+        for i, (a, b, c) in enumerate(ns_consts):
+            A = X @ X.mT
+            if precondition and i == 0:
+                s = torch.rsqrt(
+                    torch.clamp_min(A.abs().sum(dim=-1, keepdim=False), min=epsilon)
+                )
+                X = X * s.unsqueeze(-1)
+                A = A * s.unsqueeze(-1) * s.unsqueeze(-2)
 
-        if aol and i == 0:
-            s = torch.rsqrt(
-                torch.clamp_min(A.abs().sum(dim=-1, keepdim=False), min=epsilon)
-            )
-            X = X * s.unsqueeze(-1)
-            A = A * s.unsqueeze(-1) * s.unsqueeze(-2)
-        else:
-            pass
+            B = b * A + c * A @ A # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
+            X = a * X + B @ X
 
-        B = b * A + c * A @ A # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
-        X = a * X + B @ X
-    
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-    return X
+        if G.size(-2) > G.size(-1):
+            X = X.mT
+        return X
 
 
-def muon_update(grad, momentum, aol, beta=0.95, ns_steps=4, nesterov=True, epsilon=1e-6):
+def muon_update(grad, momentum, precondition, beta=0.95, ns_steps=4, nesterov=True, epsilon=1e-6):
     momentum.lerp_(grad, 1 - beta)
     update = grad.lerp_(momentum, beta) if nesterov else momentum
     if update.ndim == 4: # for the case of conv filters
         update = update.view(len(update), -1)
-    update = ns_iterations(update, aol=aol, steps=ns_steps, epsilon=epsilon)
+    update = newton_schulz(update, precondition=precondition, iter=ns_steps, epsilon=epsilon)
     update *= max(1, grad.size(-2) / grad.size(-1))**0.5
     return update
 
@@ -88,7 +97,7 @@ class TurboMuon(torch.optim.Optimizer):
             "standard":5,
             "turbo":4,
         }[self.variant]
-        aol = {
+        precondition = {
             "standard":False,
             "turbo":True,
         }[self.variant]
@@ -110,7 +119,7 @@ class TurboMuon(torch.optim.Optimizer):
                     state = self.state[p]
                     if len(state) == 0:
                         state["momentum_buffer"] = torch.zeros_like(p)
-                    update = muon_update(p.grad, state["momentum_buffer"], aol, ns_steps=steps, beta=group["momentum"])
+                    update = muon_update(p.grad, state["momentum_buffer"], precondition, ns_steps=steps, beta=group["momentum"])
                     p.mul_(1 - group["lr"] * group["weight_decay"])
                     p.add_(update.reshape(p.shape), alpha=-group["lr"])
                 dist.all_gather(params_pad[base_i:base_i + dist.get_world_size()], params_pad[base_i + dist.get_rank()])
@@ -134,7 +143,7 @@ class SingleDeviceTurboMuon(torch.optim.Optimizer):
             "standard":5,
             "turbo":4,
         }[self.variant]
-        aol = {
+        precondition = {
             "standard":False,
             "turbo":True,
         }[self.variant]
@@ -152,7 +161,7 @@ class SingleDeviceTurboMuon(torch.optim.Optimizer):
                 state = self.state[p]
                 if len(state) == 0:
                     state["momentum_buffer"] = torch.zeros_like(p)
-                update = muon_update(p.grad, state["momentum_buffer"], aol, ns_steps=steps, beta=group["momentum"])
+                update = muon_update(p.grad, state["momentum_buffer"], precondition, ns_steps=steps, beta=group["momentum"])
                 p.mul_(1 - group["lr"] * group["weight_decay"])
                 p.add_(update.reshape(p.shape), alpha=-group["lr"])
 
@@ -209,7 +218,7 @@ class TurboMuonWithAuxAdam(torch.optim.Optimizer):
                     "standard":5,
                     "turbo":4,
                 }[group["variant"]]
-                aol = {
+                precondition = {
                     "standard":False,
                     "turbo":True,
                 }[group["variant"]]
@@ -225,7 +234,7 @@ class TurboMuonWithAuxAdam(torch.optim.Optimizer):
                         state = self.state[p]
                         if len(state) == 0:
                             state["momentum_buffer"] = torch.zeros_like(p)
-                        update = muon_update(p.grad, state["momentum_buffer"], aol, ns_steps=steps, beta=group["momentum"])
+                        update = muon_update(p.grad, state["momentum_buffer"], precondition, ns_steps=steps, beta=group["momentum"])
                         p.mul_(1 - group["lr"] * group["weight_decay"])
                         p.add_(update.reshape(p.shape), alpha=-group["lr"])
                     dist.all_gather(params_pad[base_i:base_i + dist.get_world_size()], params_pad[base_i + dist.get_rank()])
@@ -286,7 +295,7 @@ class SingleDeviceTurboMuonWithAuxAdam(torch.optim.Optimizer):
                     "standard":5,
                     "turbo":4,
                 }[group["variant"]]
-                aol = {
+                precondition = {
                     "standard":False,
                     "turbo":True,
                 }[group["variant"]]
@@ -297,7 +306,7 @@ class SingleDeviceTurboMuonWithAuxAdam(torch.optim.Optimizer):
                     state = self.state[p]
                     if len(state) == 0:
                         state["momentum_buffer"] = torch.zeros_like(p)
-                    update = muon_update(p.grad, state["momentum_buffer"], aol, ns_steps=steps, beta=group["momentum"])
+                    update = muon_update(p.grad, state["momentum_buffer"], precondition, ns_steps=steps, beta=group["momentum"])
                     p.mul_(1 - group["lr"] * group["weight_decay"])
                     p.add_(update.reshape(p.shape), alpha=-group["lr"])
             else:
