@@ -12,10 +12,16 @@ In this repository, we provide the following standalone implementations:
 - An AOL preconditioned version of the Muon optimizer in the `optax` format (in `turbo_muon_optax.py`).
 
 If needed the newton schulz routines can be used independently with the `kernel` library:
+```bash
+pip install kernels
+```
+Then you can load the triton kernel as follows:
 ```python
+import torch
 from kernels import get_kernel                                                               
 kern = get_kernel("tboissin/newton_schulz_triton")                                           
-newton_schulz = torch.compile(kern.newton_schulz) # optionally compile with torch.compile    
+newton_schulz = torch.compile(kern.newton_schulz) # optionally compile with torch.compile 
+result = newton_schulz(torch.randn(8, 4096, 4096, device='cuda'), iter=4, precondition=True)
 ```
 
 ## Changes
