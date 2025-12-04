@@ -1,22 +1,10 @@
-# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
 """Muon.
 
 Implementation of the
 [Muon optimizer](https://github.com/KellerJordan/modded-nanogpt)
 by Keller Jordan
+
+Taken and adapted from the DeepMind optax repository
 """
 
 
@@ -42,7 +30,13 @@ ReshapeFn = Callable[[jax.Array], jax.Array]
 
 
 _DEFAULT_NS_COEFFS = (3.4445, -4.7750, 2.0315)
-
+_AOL_COEFFS = [
+      (4.0848, -6.8946, 2.9270),
+      (3.9505, -6.3029, 2.6377),
+      (3.7418, -5.5913, 2.3037),
+      (2.8769, -3.1427, 1.2046),
+      (2.8366, -3.0525, 1.2012),
+]
 
 class MuonDimensionNumbers(NamedTuple):
   """Specification for which weight axes participate in matrix projection.
@@ -374,13 +368,7 @@ def scale_by_muon(
     if jax.process_index() == 0:
       warnings.warn("Default ns_coeffs overriden when precondition = True",
         category=UserWarning, stacklevel=2)
-    ns_coeffs = [
-      (4.0848, -6.8946, 2.9270),
-      (3.9505, -6.3029, 2.6377),
-      (3.7418, -5.5913, 2.3037),
-      (2.8769, -3.1427, 1.2046),
-      (2.8366, -3.0525, 1.2012),
-    ][-ns_steps:]
+    ns_coeffs = _AOL_COEFFS[-ns_steps:]
 
   def init_fn(params):
     mu = optax.tree.zeros_like(params, dtype=mu_dtype)  # First moment
@@ -531,7 +519,7 @@ def muon(
     Liu et al., `Muon is Scalable for LLM Training`,
     <https://arxiv.org/abs/2502.16982>`_, 2025
 
-    Boissin et al., `Turbo-Muon: Accelerating Orthogonality-Based
+    Boissin et al., `Turbo-Muon: Accelerating Orthogonality-Based 
     Optimization with Pre-Conditioning`_, 2025
   """
   # None at root indicates the default 2D rule.
