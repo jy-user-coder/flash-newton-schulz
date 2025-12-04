@@ -563,7 +563,7 @@ def NS_ours(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
 
     # Ensure spectral norm is at most 1
     # we remove the previous normalization to switch to AOL rescaling
-    # Which is further explained in the paper: https://arxiv.org/pdf/2208.03160
+    # Which is further explained in the paper: https://hal.science/hal-05390446
     # which consists in computing W@W^t using ns_line_1 and then computing the
     # scaling factors: fast_inv_sqrt(reduce_sum(abs(WW^t), axis=-1)) which is a vector
     # since the main operation to compute those correspond to ns_line_1

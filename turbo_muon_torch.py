@@ -80,6 +80,9 @@ class TurboMuon(torch.optim.Optimizer):
 
     Arguments:
         lr: The learning rate, in units of spectral norm per update.
+        variant: Either 'standard' for regular Muon usage or 'turbo' for 
+        accelerated Newton-Schulz iterations using AOL preconditioning (
+        c.f. https://hal.science/hal-05390446).
         weight_decay: The AdamW-style weight decay.
         momentum: The momentum. A value of 0.95 here is usually fine.
     """

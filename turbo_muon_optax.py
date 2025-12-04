@@ -350,7 +350,7 @@ def scale_by_muon(
       original updates. See <https://arxiv.org/abs/2409.20325>
     precondition: Whether to use AOL preconditioning for Newton-Schulz.
       It can usually allow the user to use one less ns_step.
-      See <https://arxiv.org/abs/TODO.XXXXX>.
+      See <https://hal.science/hal-05390446>.
     weight_dimension_numbers: An optional tree with the same structure as the
       params of `MuonDimensionNumbers`s, specifying how to reshape the
       parameters before and after the orthogonalization OR a callable returning
@@ -500,7 +500,7 @@ def muon(
       original updates. See <https://arxiv.org/abs/2409.20325>
     precondition: Whether to use AOL preconditioning for Newton-Schulz.
       It can usually allow the user to use one less ns_step.
-      See <https://arxiv.org/abs/TODO.XXXXX>.
+      See <https://hal.science/hal-05390446>.
     adam_b1: Exponential decay rate for Adam's first moment estimates.
     adam_b2: Exponential decay rate for Adam's second moment estimates.
     adam_eps_root: Epsilon to stabilize division in Adam, square root version.
@@ -530,6 +530,9 @@ def muon(
 
     Liu et al., `Muon is Scalable for LLM Training`,
     <https://arxiv.org/abs/2502.16982>`_, 2025
+
+    Boissin et al., `Turbo-Muon: Accelerating Orthogonality-Based
+    Optimization with Pre-Conditioning`_, 2025
   """
   # None at root indicates the default 2D rule.
   if muon_weight_dimension_numbers is None:
