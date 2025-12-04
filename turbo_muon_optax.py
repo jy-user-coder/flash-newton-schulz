@@ -1,10 +1,22 @@
+# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 """Muon.
 
 Implementation of the
 [Muon optimizer](https://github.com/KellerJordan/modded-nanogpt)
-by Keller Jordan.
-
-Adapted to support AOL Preconditioning by massena-t and thib-s.
+by Keller Jordan
 """
 
 
@@ -23,6 +35,8 @@ from optax._src import transform
 from optax._src import utils
 from optax.transforms import _masking
 import optax.tree
+
+import warnings
 
 ReshapeFn = Callable[[jax.Array], jax.Array]
 
@@ -221,7 +235,7 @@ def orthogonalize_via_newton_schulz(
     x: jax.Array,
     ns_coeffs: jax.Array,
     ns_steps: jax.typing.ArrayLike = 5,
-    aol: bool=False,
+    precondition: bool=False,
     eps: jax.typing.ArrayLike = 1e-8,
     dimension_numbers: MuonDimensionNumbers | None = None,
 ) -> jax.Array:
@@ -265,7 +279,7 @@ def orthogonalize_via_newton_schulz(
       x = x.T
       transposed = True
 
-    if not aol:
+    if not precondition:
         x /= jnp.linalg.norm(x) + eps  # Ensure spectral norm is at most 1
         _ns_iterator = _base_ns_iterator
     else:
@@ -283,7 +297,7 @@ def orthogonalize_via_newton_schulz(
         x_new = _ns_iterator(i, x, coeffs_step)
         return (i + 1, x_new), None
 
-      init_carry = (jax.array(0, dtype=jnp.int32), x)
+      init_carry = (jnp.asarray(0, dtype=jnp.int32), x)
       (_, x), _ = jax.lax.scan(_scan_body, init_carry, ns_coeffs_)
 
     if transposed:
@@ -313,7 +327,7 @@ def scale_by_muon(
     *,
     nesterov: bool = True,
     adaptive: bool = False,
-    aol: bool = False,
+    precondition: bool = False,
     weight_dimension_numbers: WeightDimNumOrFn | None = None,
 ) -> base.GradientTransformation:
   r"""Rescale updates according to the Muon algorithm.
@@ -334,7 +348,7 @@ def scale_by_muon(
     nesterov: Whether to use Nesterov momentum.
     adaptive: Whether to scale the updates by the dual norm of the
       original updates. See <https://arxiv.org/abs/2409.20325>
-    aol: Whether to use aol preconditioning for Newton-Schulz.
+    precondition: Whether to use AOL preconditioning for Newton-Schulz.
       It can usually allow the user to use one less ns_step.
       See <https://arxiv.org/abs/TODO.XXXXX>.
     weight_dimension_numbers: An optional tree with the same structure as the
@@ -353,10 +367,25 @@ def scale_by_muon(
     <https://arxiv.org/abs/2409.20325>`_, 2024
   """
   mu_dtype = utils.canonicalize_dtype(mu_dtype)
+  cond_ = precondition and ns_coeffs == _DEFAULT_NS_COEFFS
+
+  assert ns_steps > 0, "Newton-Schulz needs at least one step"
+  if cond_ and ns_steps < 6:
+    if jax.process_index() == 0:
+      warnings.warn("Default ns_coeffs overriden when precondition = True",
+        category=UserWarning, stacklevel=2)
+    ns_coeffs = [
+      (4.0848, -6.8946, 2.9270),
+      (3.9505, -6.3029, 2.6377),
+      (3.7418, -5.5913, 2.3037),
+      (2.8769, -3.1427, 1.2046),
+      (2.8366, -3.0525, 1.2012),
+    ][-ns_steps:]
 
   def init_fn(params):
     mu = optax.tree.zeros_like(params, dtype=mu_dtype)  # First moment
     ns_coeffs_ = jnp.asarray(ns_coeffs)
+
     if ns_coeffs_.ndim > 2 or ns_coeffs_.shape[-1] != 3:
       raise ValueError(
           f'ns_coeffs must have shape (3,) or (n, 3), got {ns_coeffs_.shape}'
@@ -392,7 +421,7 @@ def scale_by_muon(
     # Apply Newton-schulz orthogonalization.
     updates = jax.tree.map(
         lambda x, dim_num: orthogonalize_via_newton_schulz(
-            x, state.ns_coeffs, ns_steps, aol, eps, dim_num),
+            x, state.ns_coeffs, ns_steps, precondition, eps, dim_num),
         mu_hat, resolved_weight_dim_nums, is_leaf=_is_weight_dim_nums)
     if adaptive:
       # Scale the orthogonalized updates by the dual norm of the original
@@ -428,7 +457,7 @@ def muon(
     *,
     nesterov: bool = True,
     adaptive: bool = False,
-    aol: bool = False,
+    precondition: bool = False,
     adam_b1: jax.typing.ArrayLike = 0.9,
     adam_b2: jax.typing.ArrayLike = 0.999,
     adam_eps_root: jax.typing.ArrayLike = 0.0,
@@ -469,7 +498,7 @@ def muon(
     nesterov: Whether to use Nesterov momentum.
     adaptive: Whether to scale the updates by the dual norm of the
       original updates. See <https://arxiv.org/abs/2409.20325>
-    aol: Whether to use aol preconditioning for Newton-Schulz.
+    precondition: Whether to use AOL preconditioning for Newton-Schulz.
       It can usually allow the user to use one less ns_step.
       See <https://arxiv.org/abs/TODO.XXXXX>.
     adam_b1: Exponential decay rate for Adam's first moment estimates.
@@ -547,7 +576,7 @@ def muon(
                   mu_dtype=mu_dtype,
                   nesterov=nesterov,
                   adaptive=adaptive,
-                  aol=aol,
+                  precondition=precondition,
                   weight_dimension_numbers=muon_weight_dim_nums_fn,
               ),
               scale_by_shape(
