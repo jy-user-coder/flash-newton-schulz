@@ -473,22 +473,28 @@ def ns_line_3(B: Tensor, X: Tensor, a: float, *, out: Tensor = None) -> Tensor:
     return out
 
 
-@torch.compile(dynamic=False, fullgraph=True)
-def NS_muon(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+# @torch.compile(dynamic=False, fullgraph=True)
+def newton_schulz_torch(G: Tensor, epsilon: float = 1e-7):
     """
     Reference implementation of Newton-Schulz without Triton.
     """
+    # Newton-Schulz constants
+    ns_consts = [
+        (4.0848, -6.8946, 2.9270),
+        (3.9505, -6.3029, 2.6377),
+        (3.7418, -5.5913, 2.3037),
+        (2.8769, -3.1427, 1.2046),
+        (2.8366, -3.0525, 1.2012),
+    ]
 
-    X = G.to(dtype=dtype)
+    X = G.to(dtype=torch.bfloat16)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
     # Ensure spectral norm is at most 1
     X = X / (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
 
-    # for a, b, c in ns_consts:
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    for _ in range(iter):
+    for a, b, c in ns_consts:
         A = X @ X.mT
         B = b * A + c * (A @ A)
         X = a * X + B @ X
@@ -498,8 +504,8 @@ def NS_muon(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
     return X
 
 
-@torch.compile(dynamic=False, fullgraph=True)
-def NS_muon_plus(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16):
+# @torch.compile(dynamic=False, fullgraph=True)
+def newton_schulz_triton_muon_plus(G: Tensor, epsilon: float = 1e-7):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -510,9 +516,9 @@ def NS_muon_plus(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16)
         (3.7418, -5.5913, 2.3037),
         (2.8769, -3.1427, 1.2046),
         (2.8366, -3.0525, 1.2012),
-    ][-iter:]
+    ]
 
-    X = G.to(dtype=dtype)
+    X = G.to(dtype=torch.bfloat16)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -539,8 +545,8 @@ def NS_muon_plus(G: Tensor, iter=5, epsilon: float = 1e-7, dtype=torch.bfloat16)
     return X
 
 
-@torch.compile(dynamic=False, fullgraph=True)
-def NS_ours(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
+# @torch.compile(dynamic=False, fullgraph=True)
+def newton_schulz_triton_aol(G: Tensor, epsilon: float = 1e-7):
     """
     Triton implementation of Newton-Schulz iteration
     """
@@ -551,8 +557,14 @@ def NS_ours(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
         (3.7418, -5.5913, 2.3037),
         (2.8769, -3.1427, 1.2046),
         (2.8366, -3.0525, 1.2012),
-    ][-iter:]
-    X = G.to(dtype=dtype)
+    ]
+    # ns_consts = [
+    #     [4.6051, -9.6552, 5.6769],
+    #     [4.7505, -6.0861, 2.1790],
+    #     [2.7763, -2.3190, 0.5523],
+    #     [2.4231, -2.2861, 0.8193],
+    # ]
+    X = G.to(dtype=torch.bfloat16)
     if G.size(-2) > G.size(-1):
         X = X.mT
 
@@ -563,7 +575,7 @@ def NS_ours(G: Tensor, iter=4, epsilon: float = 1e-7, dtype=torch.bfloat16):
 
     # Ensure spectral norm is at most 1
     # we remove the previous normalization to switch to AOL rescaling
-    # Which is further explained in the paper: https://hal.science/hal-05390446
+    # Which is further explained in the paper: https://arxiv.org/pdf/2208.03160
     # which consists in computing W@W^t using ns_line_1 and then computing the
     # scaling factors: fast_inv_sqrt(reduce_sum(abs(WW^t), axis=-1)) which is a vector
     # since the main operation to compute those correspond to ns_line_1

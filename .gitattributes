@@ -1,0 +1,7 @@
+results/0_levy-1-5.csv filter=lfs diff=lfs merge=lfs -text
+results/0_levy-2-0.csv filter=lfs diff=lfs merge=lfs -text
+results/0_normal_unif.csv filter=lfs diff=lfs merge=lfs -text
+results/0_normal_unif_f32.csv filter=lfs diff=lfs merge=lfs -text
+results/0_normal_unif_xl.csv filter=lfs diff=lfs merge=lfs -text
+results/0_normal_unif_xl_f32.csv filter=lfs diff=lfs merge=lfs -text
+results/0_levy-1-0.csv filter=lfs diff=lfs merge=lfs -text
