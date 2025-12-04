@@ -1,10 +1,22 @@
+# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
 """Muon.
 
 Implementation of the
 [Muon optimizer](https://github.com/KellerJordan/modded-nanogpt)
 by Keller Jordan
-
-Taken and adapted from the DeepMind optax repository
 """
 
 
@@ -28,15 +40,18 @@ import warnings
 
 ReshapeFn = Callable[[jax.Array], jax.Array]
 
-
 _DEFAULT_NS_COEFFS = (3.4445, -4.7750, 2.0315)
-_AOL_COEFFS = [
-      (4.0848, -6.8946, 2.9270),
-      (3.9505, -6.3029, 2.6377),
-      (3.7418, -5.5913, 2.3037),
-      (2.8769, -3.1427, 1.2046),
-      (2.8366, -3.0525, 1.2012),
+_DION_NS_COEFFS = [
+  (4.0848, -6.8946, 2.9270),
+  (3.9505, -6.3029, 2.6377),
+  (3.7418, -5.5913, 2.3037),
+  (2.8769, -3.1427, 1.2046),
+  (2.8366, -3.0525, 1.2012),
 ]
+PRESET_DICT = {
+  "standard":_DEFAULT_NS_COEFFS,
+  "dion":_DION_NS_COEFFS,
+}
 
 class MuonDimensionNumbers(NamedTuple):
   """Specification for which weight axes participate in matrix projection.
@@ -361,14 +376,6 @@ def scale_by_muon(
     <https://arxiv.org/abs/2409.20325>`_, 2024
   """
   mu_dtype = utils.canonicalize_dtype(mu_dtype)
-  cond_ = precondition and ns_coeffs == _DEFAULT_NS_COEFFS
-
-  assert ns_steps > 0, "Newton-Schulz needs at least one step"
-  if cond_ and ns_steps < 6:
-    if jax.process_index() == 0:
-      warnings.warn("Default ns_coeffs overriden when precondition = True",
-        category=UserWarning, stacklevel=2)
-    ns_coeffs = _AOL_COEFFS[-ns_steps:]
 
   def init_fn(params):
     mu = optax.tree.zeros_like(params, dtype=mu_dtype)  # First moment
@@ -378,6 +385,13 @@ def scale_by_muon(
       raise ValueError(
           f'ns_coeffs must have shape (3,) or (n, 3), got {ns_coeffs_.shape}'
       )
+    if ns_coeffs_.ndim == 2:
+      if not ns_coeffs_.shape[0] <= ns_steps:
+        raise ValueError(
+          f"Not enough coeffs to perform {ns_steps} steps"
+        )
+      ns_coeffs_ = ns_coeffs_[-ns_steps:]
+
     return MuonState(
         count=jnp.zeros([], jnp.int32),
         mu=mu,
@@ -433,6 +447,7 @@ def muon(
         tuple[jax.typing.ArrayLike, jax.typing.ArrayLike, jax.typing.ArrayLike],
         tuple[tuple[jax.typing.ArrayLike, jax.typing.ArrayLike,
                     jax.typing.ArrayLike], ...],
+        str,
     ] = _DEFAULT_NS_COEFFS,
     ns_steps: jax.typing.ArrayLike = 5,
     beta: jax.typing.ArrayLike = 0.95,
@@ -468,7 +483,8 @@ def muon(
   Args:
     learning_rate: A global scaling factor, either fixed or evolving along
       iterations with a scheduler, see :func:`optax.scale_by_learning_rate`.
-    ns_coeffs: Coefficients for the Newton-schulz method.
+    ns_coeffs: Coefficients for the Newton-schulz method (can be a string
+      indicator for a preset). Existing presets: `muon`, `dion`.
     ns_steps: Number of Newton-schulz iterations.
       Ignored if `ns_coeffs` is a tuple of tuples.
     beta: Decay rate for the exponentially weighted average of grads.
@@ -520,8 +536,21 @@ def muon(
     <https://arxiv.org/abs/2502.16982>`_, 2025
 
     Boissin et al., `Turbo-Muon: Accelerating Orthogonality-Based 
-    Optimization with Pre-Conditioning`_, 2025
+    Optimization with Pre-Conditioning`, 
+    <https://hal.science/hal-05390446>`_, 2025
+
+    Ahn et al., `Dion: Distributed Orthonormalized Updates`,
+    <https://arxiv.org/abs/2504.05295>`_, 2025
   """
+  if isinstance(ns_coeffs, str):
+    if ns_coeffs not in PRESET_DICT.keys(): 
+      raise ValueError(
+        f"Unknown ns_coeff preset string: {ns_coeffs}"
+      )
+    ns_coeffs_ = PRESET_DICT[ns_coeffs]
+  else:
+    ns_coeffs_ = ns_coeffs
+
   # None at root indicates the default 2D rule.
   if muon_weight_dimension_numbers is None:
     param_labels = lambda params: jax.tree.map(
@@ -560,7 +589,7 @@ def muon(
       transforms={
           'muon': combine.chain(
               scale_by_muon(
-                  ns_coeffs=ns_coeffs,
+                  ns_coeffs=ns_coeffs_,
                   ns_steps=ns_steps,
                   beta=beta,
                   eps=eps,
